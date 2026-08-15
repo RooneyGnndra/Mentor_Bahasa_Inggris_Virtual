@@ -53,6 +53,8 @@ def writing_exercise(text: str):
         config=types.GenerateContentConfig(system_instruction=system_instruction),
     )
 
+    logger.info("success generate writing exercise")
+
     return response.text
 
 
@@ -68,6 +70,8 @@ def speaking_exercise(text: str):
         contents=prompt,
         config=types.GenerateContentConfig(system_instruction=system_instruction),
     )
+
+    logger.info("success generate speaking exercise")
 
     return response.text
 
@@ -85,6 +89,8 @@ def reading_exercise(text: str):
         config=types.GenerateContentConfig(system_instruction=system_instruction),
     )
 
+    logger.info("success generate reading exercise")
+
     return response.text
 
 
@@ -98,7 +104,7 @@ def _listening_generate_script(text: str):
         contents=prompt,
         config=types.GenerateContentConfig(
             system_instruction=system_instruction,
-            response_json_schema=ListeningExerciseSchema.model_json_schema,
+            response_json_schema=ListeningExerciseSchema.model_json_schema(),
         ),
     )
 
@@ -114,7 +120,7 @@ def _listening_generate_audio_script(generate_script: ListeningExerciseSchema):
     speaker_one = generate_script.speaker_one
     speaker_two = generate_script.speaker_two
 
-    prompt = f"Buatkan audio (text to speech) dari percakapan antara dua orang pada script berikut ini: \n{script}"
+    prompt = f"Buatkan audio (text-to-speech) dari percakapan antara dua orang pada script berikut ini: \n{script}"
 
     response = gemini_client.models.generate_content(
         model=model,
@@ -131,7 +137,7 @@ def _listening_generate_audio_script(generate_script: ListeningExerciseSchema):
                                     voice_name="Puck"
                                 )
                             ),
-                        ),  # speaker_one
+                        ),  # speaker_one -> laki - laki -> Puck
                         types.SpeakerVoiceConfig(
                             speaker=speaker_two,
                             voice_config=types.VoiceConfig(
@@ -139,7 +145,7 @@ def _listening_generate_audio_script(generate_script: ListeningExerciseSchema):
                                     voice_name="Kore"
                                 )
                             ),
-                        ),  # speaker_two
+                        ),  # speaker_two -> perempuan -> Kore
                     ]
                 )
             ),
@@ -174,21 +180,28 @@ def listening_exercise(text: str):
 
     audio_output_path = env.OUTPUT_DIR / f"listening-{timestamp}.wav"
 
+    # 1. "model" untuk generate script percakapan dua orang
     generate_script = _listening_generate_script(text=text)
 
+    # 2. "model" untuk generate audio berdasarkan `generate_script`
     audio = _listening_generate_audio_script(generate_script=generate_script)
 
+    # 3. generate wave file
     _write_wave_file(audio_output_path, audio)
 
+    # 4. catat file audio ke channel / jalur artifacts
     artifacts.add(
         path=audio_output_path,
-        kind=audio,
-        caption="dengarkan audio latihan listening ini lalu jawab pertanyaannya",
+        kind="audio",
+        caption="dengarkan audio latihan listening ini, lalu jawab pertanyaannya.",
     )
 
+    # 5. kembalikan daftar pertanyaan
     questions_text = "\n".join(
         f"- {question}" for question in generate_script.questions
     )
+
+    logger.info("success generate listening exercise")
 
     return (
         "Audio latihan listening sudah berhasil dibuat dan terlampir otomatis"
@@ -196,12 +209,14 @@ def listening_exercise(text: str):
     )
 
 
-def skill_type_classification(text: str):
+def skill_type_classification(text: str):  # prompt dari user
     """Menentukan kebutuhan latihan yang tepat berdasarkan pesan yang disampaikan oleh peserta"""
 
+    logger.info("tools: skill_type_classification")
+
     model = env.GEMINI_MODEL
-    system_instruction = prompts.load_instruction("agent-skill-type-classifier")
-    prompt: f"Analisa pesan yang disampaikan oleh peserta kemudian tentukan latihan `skill_types` yang tepat: \n{text}"
+    system_instruction = prompts.load_instruction("agent-skill-types-classifier")
+    prompt = f"Analisa pesan yang disampaikan oleh peserta kemudian tentukan latihan `skill_types` yang tepat: \n{text}"
 
     response = gemini_client.models.generate_content(
         model=model,
@@ -242,8 +257,12 @@ def evaluate_writing(text: str):
     response = gemini_client.models.generate_content(
         model=model,
         contents=prompt,
-        config=types.GenerateContentConfig(system_instruction=system_instruction),
+        config=types.GenerateContentConfig(
+            system_instruction=system_instruction,
+        ),
     )
+
+    logger.success("success evaluate writing")
 
     return response.text
 
@@ -253,7 +272,7 @@ def evaluate_speaking(voice_file_path: str):
 
     model = env.GEMINI_MODEL
     system_instruction = prompts.load_instruction("agent-evaluate-speaking")
-    prompt = "Dengarkan rekama voice note berikut ini dan berikan penilaian kamu."
+    prompt = "Dengarkan rekaman voice note berikut ini dan berikan penilaian kamu."
 
     voice_file = gemini_client.files.upload(file=voice_file_path)
 
@@ -277,11 +296,13 @@ def evaluate_speaking(voice_file_path: str):
 
     data = EvaluateSpeakingSchema.model_validate(json.loads(response.text))
 
+    logger.success("success evaluate speaking")
+
     return data.summary
 
 
 def generate_report(
-    conversation_history: list[types.Content],
+    conversation_history: list[types.Content],  # tipe contents Gemini
     username: str,
     start_date: str,
     end_date: str,
@@ -310,5 +331,7 @@ def generate_report(
     pdf = MarkdownPdf(toc_level=2)
     pdf.add_section(Section(report_content))
     pdf.save(report_file_path)
+
+    logger.success("success generate report")
 
     return str(report_file_path)
